@@ -1,2 +1,4 @@
 gtsrb/
 dataset/
+weights/
+test*

@@ -4,13 +4,25 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import os
+import yaml
+
+# To input input for prediction
+from PIL import Image
 
 class TrafficSignCNN(nn.Module):
     
-    def __init__(self, device="cpu"):
+    def __init__(self, device="cpu", labels_path="labels.yaml"):
         super().__init__()
         self.device = device
         self.num_classes = 43
+        self.labels_dict = self.load_labels(labels_path)
+        
+        self.transform = transforms.Compose([
+                transforms.Resize((32, 32)),  # Resize images to 32x32
+                transforms.ToTensor(),        # Convert images to PyTorch tensors
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize images
+                ])
+        
         # Convolutional layers
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3)
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3)
@@ -27,6 +39,14 @@ class TrafficSignCNN(nn.Module):
         self.fullc2 = nn.Linear(in_features=256, out_features= 128)
         self.fullc3 = nn.Linear(in_features=128, out_features= self.num_classes)
 
+    # load the labels of yaml format, and prase to a dictionary
+    def load_labels(self, labels_path):
+        if os.path.exists(labels_path):
+            with open(labels_path, 'r') as file:
+                return yaml.safe_load(file)
+        else:
+            return None
+
     # Save the trained model weights and biases
     def save_model(self, name="classifier_weights"):
         if not os.path.exists("weights"):
@@ -36,7 +56,7 @@ class TrafficSignCNN(nn.Module):
 
     # Load pre-trained weights and biases to this model
     def load_model(self, path):
-        self.load_state_dict(torch.load(path))
+        self.load_state_dict(torch.load(path, weights_only=False))
 
     def forward(self, x):
         # Convolution and pooling layers
@@ -82,6 +102,22 @@ class TrafficSignCNN(nn.Module):
         loss = criterion(outputs, y_test)
         print(f"Tests correct: {tests_correct} / {tests_total}, loss: {loss}")
 
+    # Pass an RGB immage, and forward through th neural network
+    # returns a prediction with the label or index (depending if labels.yaml exists)
+    def predict(self, image):
+        image = self.transform(image)
+        image = image.unsqueeze(0)
+        image = image.to(self.device)
+
+        with torch.no_grad():
+            output = self.forward(image)
+
+        _, predicted = torch.max(output, 1)
+        
+        if self.labels_dict is not None:
+            return f"{int(predicted)}: {self.labels_dict[int(predicted)]}"
+        else:
+            return int(predicted)
 
     def __train_batches(self, train_loader : DataLoader, criterion: nn.CrossEntropyLoss, optimizer : torch.optim.Adam):
         print("Training model")
@@ -105,11 +141,28 @@ class TrafficSignCNN(nn.Module):
             if batch % 100 == 0:
                 print(f"Train Batch {batch}, Loss {loss}")
 
+    def load_dataset(self):
+    
+        # Download and transform the gtsrb dataset
+        train_data = datasets.GTSRB(root="gtsrb/train", split="train",
+                                    download=True, transform=self.transform)
+        test_data = datasets.GTSRB(root="gtsrb/test", split="test",
+                                    download=True, transform=self.transform)
+
+        # Create batch sizes for the data, support increased number of workers (multiprocessing), and moving tasks to GPU
+        train_loader = DataLoader(train_data, batch_size=9, shuffle=True, num_workers=8, pin_memory=True)
+        test_loader = DataLoader(test_data, batch_size=9, shuffle=False, num_workers=8, pin_memory=True)
+
+        return train_loader, test_loader
+
 
     # Train the model on train dataset
     # learning_rate is the gradient step, and decreasing it decreases chances for overstepping, 
     # but takes significantly longer to optimize (train)
-    def train_model(self, train_loader : DataLoader, test_loader : DataLoader, epochs=10, learning_rate=0.001):
+    def train_model(self, epochs=20, learning_rate=0.001):
+
+        train_loader, test_loader = self.load_dataset()
+
         # Loss function
         criterion = nn.CrossEntropyLoss()
         # Optimizer
@@ -128,25 +181,14 @@ def main():
     if torch.cuda.is_available():
         print(f"GPU available, running on: {torch.cuda.get_device_name(device)}")
 
-    transform = transforms.Compose([
-                transforms.Resize((32, 32)),  # Resize images to 32x32
-                transforms.ToTensor(),        # Convert images to PyTorch tensors
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize images
-                ])
-    
-    # Download and transform the gtsrb dataset
-    train_data = datasets.GTSRB(root="gtsrb/train", split="train",
-                                 download=True, transform=transform)
-    test_data = datasets.GTSRB(root="gtsrb/test", split="test",
-                                download=True, transform=transform)
-
-    # Create batch sizes for the data, support increased number of workers (multiprocessing), and moving tasks to GPU
-    train_loader = DataLoader(train_data, batch_size=5, shuffle=True, num_workers=6, pin_memory=True)
-    test_loader = DataLoader(test_data, batch_size=5, shuffle=False, num_workers=6, pin_memory=True)
-
     model = TrafficSignCNN(device).to(device)
-    model.train_model(train_loader, test_loader)
-    model.save_model()
+    #model.train_model(epochs=30, learning_rate=0.001)
+    #model.save_model()
+    model.load_model("weights/classifier_weights.pt")
+
+    test_image = Image.open("test.jpg").convert("RGB")
+    prediction = model.predict(test_image)
+    print(prediction)
 
 
 if __name__ == "__main__":
