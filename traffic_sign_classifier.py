@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-
+import os
 
 class TrafficSignCNN(nn.Module):
     
@@ -27,9 +27,14 @@ class TrafficSignCNN(nn.Module):
         self.fullc2 = nn.Linear(in_features=256, out_features= 128)
         self.fullc3 = nn.Linear(in_features=128, out_features= self.num_classes)
 
+    # Save the trained model weights and biases
     def save_model(self, name="classifier_weights"):
+        if not os.path.exists("weights"):
+            os.makedirs("weights")
+            
         torch.save(self.state_dict(), f"weights/{name}.pt")
 
+    # Load pre-trained weights and biases to this model
     def load_model(self, path):
         self.load_state_dict(torch.load(path))
 
