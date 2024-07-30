@@ -11,22 +11,23 @@ from PIL import Image
 
 class TrafficSignCNN(nn.Module):
     
-    def __init__(self, device="cpu", labels_path="labels.yaml"):
+    def __init__(self, device="cpu", labels_path="labels.yaml", input_size=64):
         super().__init__()
         self.device = device
         self.num_classes = 43
         self.labels_dict = self.load_labels(labels_path)
         
         self.transform = transforms.Compose([
-                transforms.Resize((32, 32)),  # Resize images to 32x32
+                transforms.Resize((input_size, input_size)),  # Resize images to input_size*input_size
                 transforms.ToTensor(),        # Convert images to PyTorch tensors
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize images
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize images
                 ])
         
         # Convolutional layers
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3)
-        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3)
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3)
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=64, kernel_size=3)
         self.conv3 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3)
+        self.conv4 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3)
        
         # pool layers
         self.pool = nn.MaxPool2d(kernel_size=2,stride=2, padding=0)
@@ -35,8 +36,8 @@ class TrafficSignCNN(nn.Module):
         self.dropout = nn.Dropout(0.5)
 
         # Fully connected layer
-        self.fullc1 = nn.Linear(in_features=512, out_features= 256)
-        self.fullc2 = nn.Linear(in_features=256, out_features= 128)
+        self.fullc1 = nn.Linear(in_features=1024, out_features= 512)
+        self.fullc2 = nn.Linear(in_features=512, out_features= 128)
         self.fullc3 = nn.Linear(in_features=128, out_features= self.num_classes)
 
     # load the labels of yaml format, and prase to a dictionary
@@ -66,8 +67,10 @@ class TrafficSignCNN(nn.Module):
         x = self.pool(x)
         x = F.relu(self.conv3(x))
         x = self.pool(x)
+        x = F.relu(self.conv4(x))
+        x = self.pool(x)
 
-        x = x.view(-1, 512) # flatten first fully connected layer input
+        x = x.view(-1, 1024) # flatten first fully connected layer input
 
         # Fully connected layers
         x = F.relu(self.fullc1(x))
@@ -111,13 +114,18 @@ class TrafficSignCNN(nn.Module):
 
         with torch.no_grad():
             output = self.forward(image)
+            output = torch.softmax(output, dim=1)
 
-        _, predicted = torch.max(output, 1)
+        val, predicted = torch.max(output, 1)
         
-        if self.labels_dict is not None:
-            return f"{int(predicted)}: {self.labels_dict[int(predicted)]}"
+        if val < 0.5:
+            return "no match"
         else:
-            return int(predicted)
+            if self.labels_dict is not None:
+
+                return f"{int(predicted)}: {self.labels_dict[int(predicted)]}, confidence: {val}"
+            else:
+                return int(predicted)
 
     def __train_batches(self, train_loader : DataLoader, criterion: nn.CrossEntropyLoss, optimizer : torch.optim.Adam):
         print("Training model")
@@ -141,7 +149,8 @@ class TrafficSignCNN(nn.Module):
             if batch % 100 == 0:
                 print(f"Train Batch {batch}, Loss {loss}")
 
-    def load_dataset(self):
+    # Load the GTSRB dataset and return loader
+    def load_dataset(self, batch_size=10):
     
         # Download and transform the gtsrb dataset
         train_data = datasets.GTSRB(root="gtsrb/train", split="train",
@@ -150,8 +159,8 @@ class TrafficSignCNN(nn.Module):
                                     download=True, transform=self.transform)
 
         # Create batch sizes for the data, support increased number of workers (multiprocessing), and moving tasks to GPU
-        train_loader = DataLoader(train_data, batch_size=9, shuffle=True, num_workers=8, pin_memory=True)
-        test_loader = DataLoader(test_data, batch_size=9, shuffle=False, num_workers=8, pin_memory=True)
+        train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
+        test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True)
 
         return train_loader, test_loader
 
@@ -181,8 +190,8 @@ def main():
     if torch.cuda.is_available():
         print(f"GPU available, running on: {torch.cuda.get_device_name(device)}")
 
-    model = TrafficSignCNN(device).to(device)
-    #model.train_model(epochs=30, learning_rate=0.001)
+    model = TrafficSignCNN(device, input_size=64).to(device)
+    #model.train_model(epochs=20, learning_rate=0.001)
     #model.save_model()
     model.load_model("weights/classifier_weights.pt")
 
