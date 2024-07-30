@@ -11,8 +11,9 @@ from PIL import Image
 
 class TrafficSignCNN(nn.Module):
     
-    def __init__(self, device="cpu", labels_path="labels.yaml", input_size=64):
+    def __init__(self, device="cpu", labels_path="labels.yaml", input_size=48):
         super().__init__()
+
         self.device = device
         self.num_classes = 43
         self.labels_dict = self.load_labels(labels_path)
@@ -36,9 +37,9 @@ class TrafficSignCNN(nn.Module):
         self.dropout = nn.Dropout(0.5)
 
         # Fully connected layer
-        self.fullc1 = nn.Linear(in_features=1024, out_features= 512)
-        self.fullc2 = nn.Linear(in_features=512, out_features= 128)
-        self.fullc3 = nn.Linear(in_features=128, out_features= self.num_classes)
+        self.fullc1 = nn.Linear(in_features=256, out_features= 128)
+        self.fullc2 = nn.Linear(in_features=128, out_features= 64)
+        self.fullc3 = nn.Linear(in_features=64, out_features= self.num_classes)
 
     # load the labels of yaml format, and prase to a dictionary
     def load_labels(self, labels_path):
@@ -70,7 +71,7 @@ class TrafficSignCNN(nn.Module):
         x = F.relu(self.conv4(x))
         x = self.pool(x)
 
-        x = x.view(-1, 1024) # flatten first fully connected layer input
+        x = x.view(-1, 256) # flatten first fully connected layer input
 
         # Fully connected layers
         x = F.relu(self.fullc1(x))
@@ -123,7 +124,7 @@ class TrafficSignCNN(nn.Module):
         else:
             if self.labels_dict is not None:
 
-                return f"{int(predicted)}: {self.labels_dict[int(predicted)]}, confidence: {val}"
+                return f"{int(predicted)}: {self.labels_dict[int(predicted)]}, confidence: {float(val)}"
             else:
                 return int(predicted)
 
@@ -168,9 +169,9 @@ class TrafficSignCNN(nn.Module):
     # Train the model on train dataset
     # learning_rate is the gradient step, and decreasing it decreases chances for overstepping, 
     # but takes significantly longer to optimize (train)
-    def train_model(self, epochs=20, learning_rate=0.001):
+    def train_model(self, epochs=20, learning_rate=0.001, batch_size=10):
 
-        train_loader, test_loader = self.load_dataset()
+        train_loader, test_loader = self.load_dataset(batch_size=batch_size)
 
         # Loss function
         criterion = nn.CrossEntropyLoss()
@@ -190,11 +191,18 @@ def main():
     if torch.cuda.is_available():
         print(f"GPU available, running on: {torch.cuda.get_device_name(device)}")
 
-    model = TrafficSignCNN(device, input_size=64).to(device)
-    #model.train_model(epochs=20, learning_rate=0.001)
-    #model.save_model()
+    # Initialize convolutional neural network
+    model = TrafficSignCNN(device, input_size=48).to(device)
+    # Start training the model
+    model.train_model(epochs=30, learning_rate=0.0001, batch_size=10)
+    
+    # Save the model weights after training
+    model.save_model()
+    
+    # Load the pre-trained weights and biases for the model
     model.load_model("weights/classifier_weights.pt")
 
+    # predict on a new image
     test_image = Image.open("test.jpg").convert("RGB")
     prediction = model.predict(test_image)
     print(prediction)
