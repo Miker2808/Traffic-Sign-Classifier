@@ -37,9 +37,10 @@ class TrafficSignCNN(nn.Module):
         self.dropout = nn.Dropout(0.5)
 
         # Fully connected layer
-        self.fullc1 = nn.Linear(in_features=256, out_features= 128)
-        self.fullc2 = nn.Linear(in_features=128, out_features= 64)
-        self.fullc3 = nn.Linear(in_features=64, out_features= self.num_classes)
+        self.fullc1 = nn.Linear(in_features=256, out_features= 256)
+        self.fullc2 = nn.Linear(in_features=256, out_features= 128)
+        self.fullc3 = nn.Linear(in_features=128, out_features= 64)
+        self.fullc4 = nn.Linear(in_features=64, out_features= self.num_classes)
 
     # load the labels of yaml format, and prase to a dictionary
     def load_labels(self, labels_path):
@@ -78,7 +79,9 @@ class TrafficSignCNN(nn.Module):
         x = self.dropout(x)
         x = F.relu(self.fullc2(x))
         x = self.dropout(x)
-        x = self.fullc3(x)
+        x = F.relu(self.fullc3(x))
+        x = self.dropout(x)
+        x = self.fullc4(x)
 
         return x
     
@@ -119,7 +122,7 @@ class TrafficSignCNN(nn.Module):
 
         val, predicted = torch.max(output, 1)
         
-        if val < 0.5:
+        if val < 0.8:
             return "no match"
         else:
             if self.labels_dict is not None:
@@ -170,13 +173,13 @@ class TrafficSignCNN(nn.Module):
     # learning_rate is the gradient step, and decreasing it decreases chances for overstepping, 
     # but takes significantly longer to optimize (train)
     def train_model(self, epochs=20, learning_rate=0.001, batch_size=10):
-
+        
         train_loader, test_loader = self.load_dataset(batch_size=batch_size)
 
         # Loss function
         criterion = nn.CrossEntropyLoss()
         # Optimizer
-        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=0.001)
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=0.0001)
 
         for i in range(1, epochs+1):
             print(f"Epoch {i}")
@@ -194,10 +197,10 @@ def main():
     # Initialize convolutional neural network
     model = TrafficSignCNN(device, input_size=48).to(device)
     # Start training the model
-    model.train_model(epochs=30, learning_rate=0.0001, batch_size=10)
+    #model.train_model(epochs=30, learning_rate=0.0005, batch_size=10)
     
     # Save the model weights after training
-    model.save_model()
+    #model.save_model()
     
     # Load the pre-trained weights and biases for the model
     model.load_model("weights/classifier_weights.pt")
